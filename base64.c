@@ -39,7 +39,6 @@ void base64_encode(const uint8_t* data,
 void base64_decode(const char* data, uint8_t* dst)
 {
     uint8_t saved  = 0;
-    uint8_t result = 0;
     uint8_t byte;
 
     int32_t m;
@@ -62,11 +61,9 @@ void base64_decode(const char* data, uint8_t* dst)
         }
         else
         {
-            result = saved | (byte >> n);
+            *dst++ = saved | (byte >> n);
             saved  = byte << m;
-            
-            *dst++ = result;
-            
+
             n -= 2;
             m += 2;
         }
