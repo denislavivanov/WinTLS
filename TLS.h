@@ -1,5 +1,7 @@
 #pragma once
+#include <Windows.h>
 
+typedef struct TLS TLS;
 
 /* Initialize Library */
 BOOL TLS_Init(TLS* pTLS);
