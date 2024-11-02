@@ -104,6 +104,7 @@ BOOL TLS_Init(TLS* pTLS)
     ZeroMemory(&credData, sizeof credData);
     credData.dwVersion             = SCHANNEL_CRED_VERSION;
     credData.grbitEnabledProtocols = SP_PROT_TLS1_2_CLIENT;
+    credData.dwFlags               = SCH_USE_STRONG_CRYPTO;
 
     ZeroMemory(pTLS->decryptBuff.Data, sizeof pTLS->decryptBuff.Data);
     pTLS->decryptBuff.iCode            = SEC_E_INCOMPLETE_MESSAGE;
@@ -173,6 +174,7 @@ BOOL TLS_Handshake(TLS* pTLS, SOCKET s, LPSTR szDomain)
         {
             Send(s, outBuff.pvBuffer, outBuff.cbBuffer);
             Recv(s, inBuff[0].pvBuffer, 5);
+            FreeContextBuffer(outBuff.pvBuffer);
 
             inBuff[0].cbBuffer = 5;
         }
@@ -212,11 +214,9 @@ BOOL TLS_Handshake(TLS* pTLS, SOCKET s, LPSTR szDomain)
     Send(s, outBuff.pvBuffer, outBuff.cbBuffer);
 
     QueryContextAttributesA(&pTLS->hCtx, SECPKG_ATTR_STREAM_SIZES, &pTLS->Sizes);
-    FreeContextBuffer(outBuff.pvBuffer);
     FreeCredentialsHandle(&pTLS->hCred);
     return TRUE;
 }
-
 
 int TLS_Send(TLS* pTLS, SOCKET s, PBYTE pBuff, int len)
 {
@@ -311,7 +311,7 @@ int TLS_Recv(TLS* pTLS, SOCKET s, PBYTE pBuff, int len)
                 pTLS->BuffLen             = 0;
                 decryptBuff[3].cbBuffer   = 0;
                 decryptBuff[0].pvBuffer   = pTLS->Buff;
-                pTLS->decryptBuff.iCode = SEC_E_INCOMPLETE_MESSAGE;
+                pTLS->decryptBuff.iCode   = SEC_E_INCOMPLETE_MESSAGE;
 
                 break;
             }
