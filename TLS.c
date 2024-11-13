@@ -1,31 +1,7 @@
-#define SECURITY_WIN32
 #define TLS_PACKET_LEN 16896
 
-#include <WinSock2.h>
-#include <windows.h>
-#include <sspi.h>
-#include <schannel.h>
-
 #include <stdio.h>
-
-
-typedef struct DecryptBuffer
-{
-    SECURITY_STATUS iCode;
-    SecBuffer       Data[4];
-} DecryptBuffer;
-
-typedef struct TLS
-{
-    PBYTE Buff;
-    UINT  BuffLen;
-
-    CtxtHandle hCtx;
-    CredHandle hCred;
-
-    DecryptBuffer decryptBuff;
-    SecPkgContext_StreamSizes Sizes;
-} TLS;
+#include "TLS.h"
 
 static int Recv(SOCKET s, PBYTE pBuff, int len)
 {
@@ -106,9 +82,9 @@ BOOL TLS_Init(TLS* pTLS)
     credData.grbitEnabledProtocols = SP_PROT_TLS1_2_CLIENT;
     credData.dwFlags               = SCH_USE_STRONG_CRYPTO;
 
-    ZeroMemory(pTLS->decryptBuff.Data, sizeof pTLS->decryptBuff.Data);
-    pTLS->decryptBuff.iCode            = SEC_E_INCOMPLETE_MESSAGE;
-    pTLS->decryptBuff.Data[0].pvBuffer = pTLS->Buff;
+    ZeroMemory(pTLS->DecryptBuff.Data, sizeof pTLS->DecryptBuff.Data);
+    pTLS->DecryptBuff.iCode            = SEC_E_INCOMPLETE_MESSAGE;
+    pTLS->DecryptBuff.Data[0].pvBuffer = pTLS->Buff;
 
     iCode = AcquireCredentialsHandleA(
         NULL,
@@ -150,6 +126,8 @@ BOOL TLS_Handshake(TLS* pTLS, SOCKET s, LPSTR szDomain)
     inBuff[0].BufferType = SECBUFFER_TOKEN;
     inBuff[0].cbBuffer   = TLS_PACKET_LEN;
     inBuff[0].pvBuffer   = pTLS->Buff;
+
+    pTLS->Sock = s;
 
     iCode = InitializeSecurityContextA(
         &pTLS->hCred,
@@ -218,7 +196,7 @@ BOOL TLS_Handshake(TLS* pTLS, SOCKET s, LPSTR szDomain)
     return TRUE;
 }
 
-int TLS_Send(TLS* pTLS, SOCKET s, PBYTE pBuff, int len)
+int TLS_Send(TLS* pTLS, PBYTE pBuff, int len)
 {
     int           iCode;
     int           copyBytes;
@@ -248,9 +226,9 @@ int TLS_Send(TLS* pTLS, SOCKET s, PBYTE pBuff, int len)
         encryptBuff[2].pvBuffer = pTLS->Buff + pTLS->Sizes.cbHeader + copyBytes;
 
         EncryptMessage(&pTLS->hCtx, 0, &buffDesc, 0);
-        iCode = Send(s, encryptBuff[0].pvBuffer, encryptBuff[0].cbBuffer +
-                                                 encryptBuff[1].cbBuffer +
-                                                 encryptBuff[2].cbBuffer);
+        iCode = Send(pTLS->Sock, encryptBuff[0].pvBuffer, encryptBuff[0].cbBuffer +
+                                                          encryptBuff[1].cbBuffer +
+                                                          encryptBuff[2].cbBuffer);
         if (iCode == SOCKET_ERROR)
             return -1;
 
@@ -261,7 +239,7 @@ int TLS_Send(TLS* pTLS, SOCKET s, PBYTE pBuff, int len)
     return 0;
 }
 
-int TLS_Recv(TLS* pTLS, SOCKET s, PBYTE pBuff, int len)
+int TLS_Recv(TLS* pTLS, PBYTE pBuff, int len)
 {
     int originLen;
     int readBytes;
@@ -270,7 +248,7 @@ int TLS_Recv(TLS* pTLS, SOCKET s, PBYTE pBuff, int len)
     SecBuffer*    decryptBuff;
 
     originLen   = len;
-    decryptBuff = pTLS->decryptBuff.Data;
+    decryptBuff = pTLS->DecryptBuff.Data;
 
     buffDesc.cBuffers  = 4;
     buffDesc.pBuffers  = decryptBuff;
@@ -278,7 +256,7 @@ int TLS_Recv(TLS* pTLS, SOCKET s, PBYTE pBuff, int len)
 
     while (len > 0)
     {
-        if (pTLS->decryptBuff.iCode == SEC_E_INCOMPLETE_MESSAGE)
+        if (pTLS->DecryptBuff.iCode == SEC_E_INCOMPLETE_MESSAGE)
         {
             if (pTLS->BuffLen == TLS_PACKET_LEN)
             {
@@ -289,8 +267,8 @@ int TLS_Recv(TLS* pTLS, SOCKET s, PBYTE pBuff, int len)
                 decryptBuff[0].pvBuffer = pTLS->Buff;
             }
 
-            readBytes = recv(s, pTLS->Buff + pTLS->BuffLen,
-                            TLS_PACKET_LEN - pTLS->BuffLen, 0);
+            readBytes = recv(pTLS->Sock, pTLS->Buff + pTLS->BuffLen,
+                             TLS_PACKET_LEN - pTLS->BuffLen, 0);
 
             if (readBytes <= 0)
                 return readBytes;
@@ -311,7 +289,7 @@ int TLS_Recv(TLS* pTLS, SOCKET s, PBYTE pBuff, int len)
                 pTLS->BuffLen             = 0;
                 decryptBuff[3].cbBuffer   = 0;
                 decryptBuff[0].pvBuffer   = pTLS->Buff;
-                pTLS->decryptBuff.iCode   = SEC_E_INCOMPLETE_MESSAGE;
+                pTLS->DecryptBuff.iCode   = SEC_E_INCOMPLETE_MESSAGE;
 
                 break;
             }
@@ -325,7 +303,7 @@ int TLS_Recv(TLS* pTLS, SOCKET s, PBYTE pBuff, int len)
         decryptBuff[2].BufferType = SECBUFFER_EMPTY;
         decryptBuff[3].BufferType = SECBUFFER_EMPTY;
 
-        pTLS->decryptBuff.iCode = DecryptMessage(&pTLS->hCtx, &buffDesc, 0, 0);
+        pTLS->DecryptBuff.iCode = DecryptMessage(&pTLS->hCtx, &buffDesc, 0, 0);
     }
 
     return originLen - len;
